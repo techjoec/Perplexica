@@ -70,18 +70,33 @@ class OpenAILLM extends BaseLLM<OpenAIConfig> {
   }
 
   async generateText(input: GenerateTextInput): Promise<GenerateTextOutput> {
+    // Check if this is an OpenRouter model
+    const isOpenRouter =
+      this.config.model?.startsWith('openrouter/') ||
+      this.config.baseURL?.includes('openrouter');
+
+    // DeepSeek models support tool calling via OpenRouter (confirmed in their docs)
+    const isDeepSeek =
+      this.config.model?.toLowerCase().includes('deepseek') ||
+      this.config.model?.toLowerCase().includes('nex-agi');
+
+    // Only disable tools for non-DeepSeek OpenRouter models
+    const disableTools = isOpenRouter && !isDeepSeek;
+
     const openaiTools: ChatCompletionTool[] = [];
 
-    input.tools?.forEach((tool) => {
-      openaiTools.push({
-        type: 'function',
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: z.toJSONSchema(tool.schema),
-        },
+    if (!disableTools) {
+      input.tools?.forEach((tool) => {
+        openaiTools.push({
+          type: 'function',
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: z.toJSONSchema(tool.schema),
+          },
+        });
       });
-    });
+    }
 
     const response = await this.openAIClient.chat.completions.create({
       model: this.config.model,
@@ -127,18 +142,33 @@ class OpenAILLM extends BaseLLM<OpenAIConfig> {
   async *streamText(
     input: GenerateTextInput,
   ): AsyncGenerator<StreamTextOutput> {
+    // Check if this is an OpenRouter model
+    const isOpenRouter =
+      this.config.model?.startsWith('openrouter/') ||
+      this.config.baseURL?.includes('openrouter');
+
+    // DeepSeek models support tool calling via OpenRouter (confirmed in their docs)
+    const isDeepSeek =
+      this.config.model?.toLowerCase().includes('deepseek') ||
+      this.config.model?.toLowerCase().includes('nex-agi');
+
+    // Only disable tools for non-DeepSeek OpenRouter models
+    const disableTools = isOpenRouter && !isDeepSeek;
+
     const openaiTools: ChatCompletionTool[] = [];
 
-    input.tools?.forEach((tool) => {
-      openaiTools.push({
-        type: 'function',
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: z.toJSONSchema(tool.schema),
-        },
+    if (!disableTools) {
+      input.tools?.forEach((tool) => {
+        openaiTools.push({
+          type: 'function',
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: z.toJSONSchema(tool.schema),
+          },
+        });
       });
-    });
+    }
 
     const stream = await this.openAIClient.chat.completions.create({
       model: this.config.model,
@@ -164,27 +194,39 @@ class OpenAILLM extends BaseLLM<OpenAIConfig> {
     for await (const chunk of stream) {
       if (chunk.choices && chunk.choices.length > 0) {
         const toolCalls = chunk.choices[0].delta.tool_calls;
-        yield {
-          contentChunk: chunk.choices[0].delta.content || '',
-          toolCallChunk:
-            toolCalls?.map((tc) => {
+        let parsedToolCalls: ToolCall[] = [];
+
+        if (toolCalls) {
+          for (const tc of toolCalls) {
+            try {
               if (!recievedToolCalls[tc.index]) {
                 const call = {
-                  name: tc.function?.name!,
-                  id: tc.id!,
+                  name: tc.function?.name || '',
+                  id: tc.id || `tool_${tc.index}`,
                   arguments: tc.function?.arguments || '',
                 };
                 recievedToolCalls.push(call);
-                return { ...call, arguments: parse(call.arguments || '{}') };
+                parsedToolCalls.push({ ...call, arguments: parse(call.arguments || '{}') as Record<string, unknown> });
               } else {
                 const existingCall = recievedToolCalls[tc.index];
                 existingCall.arguments += tc.function?.arguments || '';
-                return {
+                parsedToolCalls.push({
                   ...existingCall,
-                  arguments: parse(existingCall.arguments),
-                };
+                  arguments: parse(existingCall.arguments || '{}') as Record<string, unknown>,
+                });
               }
-            }) || [],
+            } catch (parseErr) {
+              console.warn('Failed to parse tool call arguments:', parseErr);
+              // Return empty object for malformed JSON
+              const call = recievedToolCalls[tc.index] || { name: '', id: `tool_${tc.index}`, arguments: '' };
+              parsedToolCalls.push({ name: call.name, id: call.id, arguments: {} });
+            }
+          }
+        }
+
+        yield {
+          contentChunk: chunk.choices[0].delta.content || '',
+          toolCallChunk: parsedToolCalls,
           done: chunk.choices[0].finish_reason !== null,
           additionalInfo: {
             finishReason: chunk.choices[0].finish_reason,
@@ -194,9 +236,38 @@ class OpenAILLM extends BaseLLM<OpenAIConfig> {
     }
   }
 
+  private stripMarkdownCodeFence(text: string): string {
+    // Strip ```json ... ``` or ``` ... ``` wrappers
+    const match = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+    return match ? match[1] : text;
+  }
+
   async generateObject<T>(input: GenerateObjectInput): Promise<T> {
-    const response = await this.openAIClient.chat.completions.parse({
-      messages: this.convertToOpenAIMessages(input.messages),
+    // Use json_object mode for Groq/OpenRouter (don't support json_schema on most models)
+    const needsJsonObjectMode =
+      this.config.baseURL?.includes('groq') ||
+      this.config.model?.startsWith('groq/') ||
+      this.config.model?.startsWith('openrouter/');
+
+    // For json_object mode, inject schema into system prompt since it won't be enforced
+    let messages = this.convertToOpenAIMessages(input.messages);
+    if (needsJsonObjectMode) {
+      const schemaJson = JSON.stringify(z.toJSONSchema(input.schema), null, 2);
+      const schemaPrompt = `You MUST respond with valid JSON matching this exact schema. All fields are required unless marked optional:\n${schemaJson}\n\nRespond ONLY with the JSON object, no additional text.`;
+
+      // Prepend schema instruction to first message or add as system message
+      if (messages.length > 0 && messages[0].role === 'system') {
+        messages[0] = {
+          ...messages[0],
+          content: `${messages[0].content}\n\n${schemaPrompt}`,
+        };
+      } else {
+        messages = [{ role: 'system', content: schemaPrompt }, ...messages];
+      }
+    }
+
+    const response = await this.openAIClient.chat.completions.create({
+      messages,
       model: this.config.model,
       temperature:
         input.options?.temperature ?? this.config.options?.temperature ?? 1.0,
@@ -209,18 +280,32 @@ class OpenAILLM extends BaseLLM<OpenAIConfig> {
         this.config.options?.frequencyPenalty,
       presence_penalty:
         input.options?.presencePenalty ?? this.config.options?.presencePenalty,
-      response_format: zodResponseFormat(input.schema, 'object'),
+      response_format: needsJsonObjectMode ? { type: 'json_object' } : zodResponseFormat(input.schema, 'object'),
     });
 
     if (response.choices && response.choices.length > 0) {
       try {
-        return input.schema.parse(
-          JSON.parse(
-            repairJson(response.choices[0].message.content!, {
-              extractJson: true,
-            }) as string,
-          ),
-        ) as T;
+        const rawContent = response.choices[0].message.content!;
+        const strippedContent = this.stripMarkdownCodeFence(rawContent.trim());
+        const parsed = JSON.parse(
+          repairJson(strippedContent, {
+            extractJson: true,
+          }) as string,
+        );
+
+        // For json_object mode, use safeParse and provide defaults for missing fields
+        if (needsJsonObjectMode) {
+          const result = input.schema.safeParse(parsed);
+          if (result.success) {
+            return result.data as T;
+          }
+          // Log validation errors but try to return partial data with defaults
+          console.warn('Schema validation failed, attempting partial parse:', result.error.issues);
+          // Return parsed object as-is, let caller handle missing fields
+          return parsed as T;
+        }
+
+        return input.schema.parse(parsed) as T;
       } catch (err) {
         throw new Error(`Error parsing response from OpenAI: ${err}`);
       }

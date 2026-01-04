@@ -13,3 +13,6 @@ export const getConfiguredModelProviderById = (
 
 export const getSearxngURL = () =>
   configManager.getConfig('search.searxngURL', '');
+
+export const getCloudflareRAGURL = () =>
+  process.env.CLOUDFLARE_RAG_URL || configManager.getConfig('search.cloudflareRAGURL', '');

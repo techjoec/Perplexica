@@ -1,4 +1,5 @@
 import academicSearchAction from './academicSearch';
+import captionSearchAction from './captionSearch';
 import doneAction from './done';
 import planAction from './plan';
 import ActionRegistry from './registry';
@@ -8,6 +9,7 @@ import uploadsSearchAction from './uploadsSearch';
 import webSearchAction from './webSearch';
 
 ActionRegistry.register(webSearchAction);
+ActionRegistry.register(captionSearchAction);
 ActionRegistry.register(doneAction);
 ActionRegistry.register(planAction);
 ActionRegistry.register(scrapeURLAction);
