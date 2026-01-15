@@ -8,6 +8,7 @@ services:
       - data:/home/perplexica/data
     environment:
       - CLOUDFLARE_RAG_URL=${CLOUDFLARE_RAG_URL:-https://craftypanda-rag.techjoe.workers.dev}
+      - CLOUDFLARE_RAG_API_KEY=${CLOUDFLARE_RAG_API_KEY}
       - OPENAI_API_BASE=${OPENAI_API_BASE}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:

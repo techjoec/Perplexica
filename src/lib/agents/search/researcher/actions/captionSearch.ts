@@ -1,6 +1,6 @@
 import z from 'zod';
 import { ResearchAction } from '../../types';
-import { getCloudflareRAGURL } from '@/lib/config/serverRegistry';
+import { getCloudflareRAGURL, getCloudflareRAGAPIKey } from '@/lib/config/serverRegistry';
 import { Chunk, SearchResultsResearchBlock } from '@/lib/types';
 
 const actionSchema = z.object({
@@ -79,9 +79,15 @@ const captionSearchAction: ResearchAction<typeof actionSchema> = {
     }
 
     try {
+      const apiKey = getCloudflareRAGAPIKey();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
       const res = await fetch(`${ragURL}/search`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ query: input.query, limit: 5, threshold: 0.5 }),
       });
 

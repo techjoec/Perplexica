@@ -16,3 +16,6 @@ export const getSearxngURL = () =>
 
 export const getCloudflareRAGURL = () =>
   process.env.CLOUDFLARE_RAG_URL || configManager.getConfig('search.cloudflareRAGURL', '');
+
+export const getCloudflareRAGAPIKey = () =>
+  process.env.CLOUDFLARE_RAG_API_KEY || '';
