@@ -3,15 +3,27 @@ use_default_settings: true
 general:
   instance_name: 'searxng'
 
+server:
+  secret_key: "craftypanda_searxng_secret_2024"
+  limiter: false
+  image_proxy: true
+
 search:
-  autocomplete: 'google'
+  safe_search: 0
+  autocomplete: "google"
+  default_lang: "en"
   formats:
     - html
     - json
 
-server:
-  secret_key: 'a2fb23f1b02e6ee83875b09826990de0f6bd908b6638e8c10277d415f6ab852b' # Is overwritten by ${SEARXNG_SECRET}
-
 engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: wikipedia
+    disabled: false
   - name: wolframalpha
     disabled: false
