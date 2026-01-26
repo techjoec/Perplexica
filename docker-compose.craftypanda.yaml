@@ -1,5 +1,6 @@
 services:
   perplexica:
+    image: itzcrazykns1337/perplexica:latest
     build:
       context: .
     ports:
@@ -9,18 +10,6 @@ services:
     environment:
       - CLOUDFLARE_RAG_URL=${CLOUDFLARE_RAG_URL:-https://craftypanda-rag.techjoe.workers.dev}
       - CLOUDFLARE_RAG_API_KEY=${CLOUDFLARE_RAG_API_KEY}
-      - OPENAI_API_BASE=${OPENAI_API_BASE}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    depends_on:
-      - searxng
-    restart: unless-stopped
-
-  searxng:
-    image: searxng/searxng:latest
-    ports:
-      - '127.0.0.1:8080:8080'
-    volumes:
-      - ./searxng:/etc/searxng
     restart: unless-stopped
 
 volumes:
